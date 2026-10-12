@@ -1,0 +1,13 @@
+name: jpca
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - numpy
+  - scipy
+  - scikit-learn
+  - matplotlib
+  - jupyterlab
+  - ipykernel
+  - nbformat
+  - nbconvert
