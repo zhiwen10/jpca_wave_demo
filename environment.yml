@@ -3,6 +3,7 @@ channels:
   - conda-forge
 dependencies:
   - python=3.11
+  - libblas=*=*openblas   # avoid MKL: mkl 2026.1 + llvm-openmp crashes NumPy linalg on Windows
   - numpy
   - scipy
   - scikit-learn

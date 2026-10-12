@@ -12,14 +12,16 @@ and (2) a from-scratch explainer of the jPCA method itself, best read first.
 - `00_real_data_churchland2012.ipynb` — the real `exampleData.mat` from the
   official jPCA distribution (maze task: 108 conditions, 218 units — matches the
   paper's N-array / monkey N panel), explored nwb4edu-style and run
-  through our own pipeline. Includes a before/after view of the two active
-  preprocessing steps (soft-normalization, condition-mean subtraction),
-  the peak-time-sorted raster on real
-  data (the Kuzmina construction made visible), the jPCA run itself (with the
-  steps explained in comments), the real rotation figure,
-  a side-by-side PCA-vs-jPCA projection of the same trajectories
-  (variance axes vs dynamics axes), and a refit on the paper's 200 ms
-  analysis window showing why our default figure looks messier than Fig. 3.
+  through our own pipeline as a step-by-step demo: after a before/after view of
+  the two active preprocessing steps (soft-normalization, condition-mean
+  subtraction) and the peak-time-sorted raster on real data (the Kuzmina
+  construction made visible), each stage of jPCA gets its own cell — stacking +
+  PCA to 6 latents, the least-squares fit of dZ/dt = M·Z with the
+  conjugate-gradient skew-symmetric constraint, the eigendecomposition into
+  rotation planes + frequencies with axis alignment, and the projection into the
+  top planes that produces the loop figure — followed by a refit on the paper's
+  200 ms analysis window showing why the full-window figure looks messier than
+  Fig. 3.
   Matches the reference conventions of the original toolbox (and the
   bantin/jPCA port): constrained skew-symmetric fit (`refine_skew=True`),
   in-plane axes aligned so preparatory states lie along jPC1

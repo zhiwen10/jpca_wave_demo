@@ -41,11 +41,34 @@ the *maze* task data — the 8-target center-out sets are different datasets (se
 README for links); the straight reaches are a subset of the 108 conditions here.
 
 The data is already distributed as smoothed firing rates, so we skip the smoothing
-step of `preprocess` and keep only soft-normalization + cross-condition mean subtraction."""),
+step of `preprocess` and keep only soft-normalization + cross-condition mean subtraction.
+
+**The dynamical-systems approach.** Instead of reading neurons one at a time, treat the
+whole population as ONE point moving through "neuron space" (one axis per neuron) — one
+**trajectory** per condition — and fit a law of motion to those trajectories:
+**dX/dt = M·X**, "where the state is heading = one fixed matrix × where it is". jPCA is
+exactly that idea, with one constraint on M.
+
+**The constraint: a skew-symmetric matrix.** Any matrix splits into a symmetric part
+(which stretches/shrinks the state — growth and decay) and a **skew-symmetric** part
+(M = −Mᵀ), which only *rotates* the state. A skew-symmetric matrix has purely imaginary
+eigenvalues in ±iω pairs, and each pair defines one plane in which the state rotates at
+frequency ω/2π. jPCA keeps only this rotational part of the fitted dynamics. (Notebook
+02 walks through all of this math slowly, by hand.)
+
+**The pipeline, step by step** — each step below gets its own cell(s):
+
+1. load the real data and look at single neurons,
+2. preprocess (soft-normalize, subtract the condition mean — the data is already smoothed),
+3. stack the conditions and PCA down to 6 latent dimensions,
+4. fit dZ/dt = M·Z with M constrained to be skew-symmetric,
+5. eigendecompose M → rotation planes and frequencies; align the axes within each plane,
+6. project the trajectories into the top planes → the loop figure, first on the full
+   window, then on the paper's first-200-ms window."""),
 
 code(HEADER + """
 
-# --- Load the real data (scipy only; the .mat predates v7.3) ----------------
+# --- Step 1: load the real data (scipy only; the .mat predates v7.3) --------
 from scipy.io import loadmat
 
 # squeeze_me collapses the (1, 108) struct array to a plain (108,) record
@@ -102,13 +125,13 @@ plt.xlabel('neuron (sorted by peak time)'); plt.ylabel('time (ms)')
 plt.title('Real data, one condition, neurons sorted by peak time\\n— the "wave" appears by construction')
 plt.colorbar(label='sp/s'); plt.show()"""),
 
-md("""**Preprocessing on the real data, before → after.** The same steps as everywhere in
-this repo, except the smoothing step is skipped (`smooth_sd_ms=0`): this file already
-contains smoothed firing rates. Watch the two active steps — soft-normalization and
-condition-mean subtraction — on the most strongly modulated unit and a
-quiet-but-responsive one (10th percentile of range):"""),
+md("""**Step 2 — preprocessing on the real data, before → after.** The same steps as
+everywhere in this repo, except the smoothing step is skipped (`smooth_sd_ms=0`): this
+file already contains smoothed firing rates. Watch the two active steps —
+soft-normalization and condition-mean subtraction — on the most strongly modulated
+unit and a quiet-but-responsive one (10th percentile of range):"""),
 
-code("""# --- What the preprocessing does to the real data, before -> after ----------
+code("""# --- Step 2: what the preprocessing does to the real data, before -> after --
 spread = rates_real.max(axis=(1, 2)) - rates_real.min(axis=(1, 2))     # per-unit range
 normed = rates_real / (spread + 5.0)[:, None, None]                    # 2. soft-normalize
 final = normed - normed.mean(axis=1, keepdims=True)                    # 3. subtract condition mean
@@ -143,38 +166,129 @@ fig.tight_layout(); plt.show()
 rates_p = preprocess(rates_real, bin_ms=10, smooth_sd_ms=0)   # one call, already smoothed
 print('check: step-by-step == preprocess():', np.allclose(final, rates_p))"""),
 
-md("""**The jPCA step, mathematically.** After PCA we have reduced trajectories Z(t) in a
-6-D latent space. We fit the best linear flow dZ/dt ≈ M·Z by least squares, then keep
-only the rotational part: M is constrained to be **skew-symmetric** (M = −Mᵀ), a matrix
-that produces *purely rotational* flow. The closed-form projection (M − Mᵀ)/2 is only
-the initialization — the original 2012 toolbox (and our `jpca()`) refines it by
-minimizing ‖dZ − M·Z‖² directly over skew-symmetric matrices, via conjugate gradients.
-Eigendecomposing the fitted M yields purely imaginary conjugate pairs ±iω: each pair's
-complex eigenvector spans one rotation plane (the "jPC planes"), rotating at frequency
-ω/2π. Projecting the data into those planes is what produces the famous figure.
+md("""**Step 3 — stack the conditions and PCA down to 6 latent dimensions.** Every
+(condition, time) pair becomes one column of a big state matrix; PCA then finds the 6
+directions that carry the most variance. Everything jPCA does from here happens inside
+that 6-D space — it only picks new axes within it."""),
 
-One metric subtlety: the whole-space R² measures the fit across *all six* latent
-dimensions, including non-rotational ones whose derivative no skew-symmetric M can fit —
-so it is diluted. The honest per-plane metric is the **in-plane R²**: how well rotation
-fits *within* each jPC plane. We report both below."""),
+code("""# --- Step 3: stack conditions end to end, then PCA ---------------------------
+from sklearn.decomposition import PCA
 
-code("""res = jpca(rates_p, n_pcs=6, dt_s=0.01)
-# inside jpca() (see jpca_core.py):
-#   1. stack all 108 conditions end to end -> one (218, C*T) matrix of states
-#   2. PCA down to 6 latent dimensions
-#   3. least-squares fit of dZ/dt = M·Z between adjacent time bins
-#   4. constrain M to be skew-symmetric (pure rotation only), refined by
-#      conjugate gradients as in the original 2012 toolbox
-#   5. read rotation planes + frequencies off the imaginary eigenvalue pairs of M
-#   6. align axes within each plane so preparatory states lie along jPC1 (display only)
-print('whole-space skew-symmetric fit R^2 = %.3f' % res['r2'])
-print('plane frequencies (Hz):', np.round(res['freqs_hz'], 2))
-projs = project_planes(res)
+n_pcs, dt_s = 6, 0.01                             # 6 PCs -> 3 planes; 10 ms bins
+
+# Stack conditions end to end: every (condition, time) pair is one sample.
+X = rates_p.reshape(N, C * T)                     # (N, C*T)
+
+# PCA down to the top 6 PCs. Z is the population state in PC space.
+pca = PCA(n_components=n_pcs)
+Z = pca.fit_transform(X.T).T                      # (6, C*T)
+print('PCA: %d neurons -> %d PCs holding %.0f%% of the variance'
+      % (N, n_pcs, 100 * pca.explained_variance_ratio_.sum()))"""),
+
+md("""**Step 4 — fit the law of motion, rotation only.** Fit dZ = M·Z between adjacent
+time bins by ordinary least squares, first unconstrained (M may stretch, shrink, and
+rotate), then restricted to skew-symmetric M — rotation only. Only the 15 entries above
+the diagonal of a 6×6 skew matrix are free; conjugate gradients minimize ‖dZ − M·Z‖²
+over them directly, starting from the closed-form projection (M_full − M_fullᵀ)/2 —
+the same constrained fit as the original 2012 toolbox.
+
+Comparing the two R² values tells you how much of the motion is rotational. One metric
+subtlety: this whole-space R² is measured across *all six* latent dimensions, including
+non-rotational ones whose derivative no skew-symmetric M can fit — so it is diluted.
+The honest per-plane metric, the in-plane R², comes in step 6."""),
+
+code("""# --- Step 4: least-squares fit of dZ = M Z, then the skew-symmetric-only fit -
+from scipy.optimize import minimize
+
+# State and its change over one time step. (As in jpca(), the difference runs
+# along the stacked axis, so it also includes the C-1 jumps from the end of one
+# condition to the start of the next.)
+Z0 = Z[:, :-1]                                    # state now
+dZ = np.diff(Z, axis=1)                           # state next - state now
+
+# a) unconstrained least squares: M_full may stretch, shrink and rotate
+M_full = np.linalg.lstsq(Z0.T, dZ.T, rcond=None)[0].T
+r2_full = 1.0 - np.sum((dZ - M_full @ Z0) ** 2) / np.sum(dZ ** 2)
+
+# b) skew-symmetric only (M = -M^T): such a matrix can only rotate.
+#    (M_full - M_full^T)/2 is the closed-form starting guess; conjugate
+#    gradients then finds the best skew-symmetric M. Only the entries above
+#    the diagonal are free (15 numbers for 6x6), so we optimize those.
+iu = np.triu_indices(n_pcs, k=1)
+
+def vec2mat(h):                                   # 15 numbers -> 6x6 skew matrix
+    M = np.zeros((n_pcs, n_pcs))
+    M[iu] = h
+    return M - M.T
+
+def objective(h):                                 # squared error of dZ = M Z0
+    return 0.5 * np.sum((Z0.T @ vec2mat(h).T - dZ.T) ** 2)
+
+def gradient(h):
+    dM = (Z0 @ Z0.T @ vec2mat(h).T) - (Z0 @ dZ.T)
+    return (dM.T - dM)[iu]
+
+M_start = 0.5 * (M_full - M_full.T)
+fit = minimize(objective, M_start[iu], jac=gradient, method='CG',
+               options=dict(maxiter=10000, gtol=1e-4))
+M_skew = vec2mat(fit.x)
+
+r2 = 1.0 - np.sum((dZ - M_skew @ Z0) ** 2) / np.sum(dZ ** 2)
+print('fit R^2: any linear dynamics %.3f | rotation only %.3f' % (r2_full, r2))"""),
+
+md("""**Step 5 — eigenvalues → planes and frequencies.** A skew-symmetric matrix has
+purely imaginary eigenvalues in conjugate pairs ±iω: each pair is one rotation plane,
+ω its angular speed. The real and imaginary parts of each eigenvector span the plane
+(QR makes them an orthonormal basis). Finally, a display convention from the original
+toolbox: the axes *within* each plane are rotated so the first-bin — preparatory —
+states lie along jPC1; this changes nothing about the fit or the variances."""),
+
+code("""# --- Step 5: eigendecompose M_skew -> rotation planes, frequencies, axes ----
+eigvals, eigvecs = np.linalg.eig(M_skew)
+print('eigenvalues (imaginary part):', np.round(np.sort(eigvals.imag), 4))
+planes, freqs_hz = [], []
+for i in np.argsort(-eigvals.imag):               # fastest rotation first
+    if eigvals[i].imag <= 1e-10:
+        break                                     # the rest are the -i*w partners
+    v = eigvecs[:, i]
+    Q, _ = np.linalg.qr(np.column_stack([v.real, v.imag]))
+    planes.append(Q)                              # (6, 2): PC space -> this plane
+    freqs_hz.append(eigvals[i].imag / (2 * np.pi * dt_s))   # rad/bin -> Hz
+
+# Display convention: the two axes inside a plane are arbitrary up to a
+# rotation, so turn them until the starting (first-bin, preparatory) states
+# spread along jPC1. Pure in-plane rotation: nothing about the fit changes.
+Zc = Z.reshape(n_pcs, C, T)
+for k, Q in enumerate(planes):
+    coords = np.einsum('ij,jct->ict', Q.T, Zc)    # (2, C, T) in-plane trajectories
+    start = coords[:, :, 0].T                     # (C, 2) starting states
+    rot = PCA(n_components=2).fit(start).components_
+    if np.linalg.det(rot) < 0:                    # keep the basis right-handed
+        rot[1] = -rot[1]
+    new = np.einsum('ij,jct->ict', rot, coords)
+    if np.abs(new[1]).max() > new[1].max():       # largest jPC2 excursion positive
+        rot = -rot
+    planes[k] = Q @ rot.T
+print('rotation frequencies (Hz):', np.round(freqs_hz, 2))"""),
+
+md("""**Step 6 — project the trajectories into the top planes.** Two dot products per time
+point — coordinate 1 = a·Z(t), coordinate 2 = b·Z(t), where a and b span the plane —
+and plotting one against the other as time runs *is* the famous jPCA loop figure. We
+also report each plane's share of the variance and its **in-plane R²** (the rotational
+fit restricted to that 2-D plane — the honest per-plane metric, free of the dilution
+noted in step 4)."""),
+
+code("""# --- Step 6: project into the jPC planes -> the loop figure ------------------
+# Collect the fitted pieces in the same dict layout jpca() returns, so we can
+# reuse project_planes() for the projections and in-plane R^2.
+res = dict(pca=pca, Z=Z, M_skew=M_skew, r2=r2, eigvals=eigvals,
+           planes=planes, freqs_hz=freqs_hz, n_conditions=C, dt_s=dt_s)
+
+projs = project_planes(res)                       # planes ordered by variance
 for k, (_, frac, r2p) in enumerate(projs, 1):
     print('jPC plane %d: %4.1f%% of variance | in-plane rotation R^2 = %+.2f | %.2f Hz'
           % (k, 100 * frac, r2p, res['freqs_hz'][k - 1]))
 
-# --- The rotation figure on the real data ------------------------------------
 fig, axes = plt.subplots(1, 2, figsize=(10, 4.6))
 for ax, (coords, frac, r2p), k in zip(axes, projs, [1, 2]):
     cols_k = start_ordered_colors(coords)      # color = starting jPC1 (preparatory)
@@ -192,87 +306,35 @@ fig.suptitle('Churchland 2012 maze-task data — color = sorted starting jPC1 '
              '(preparatory state), matching the original paper convention')
 fig.tight_layout(); plt.show()"""),
 
-md("""## Same data, different lens: PCA vs jPCA
+md("""## The paper's window: the first 200 ms
 
-The classic 8-target "starburst" figures in the reaching literature are plain **PCA**
-projections — axes that maximize variance. jPCA uses the *same* data and the *same*
-initial PCA reduction, then re-rotates within that 6-D PC space so the axes align with
-rotational dynamics instead of variance. Both views below come from the identical
-preprocessed rates (`rates_p`): the left panel is simply the top two PCs
-(`res['Z'][:2]`), the right is jPC plane 1.
-
-Watch what changes: in the variance view, conditions spread apart (condition identity
-dominates variance — the "spokes" / initial states). In the dynamics view, the same
-trajectories wind into nested loops rotating in a common direction. As the 2012 paper
-puts it, the rotations *"were always present in the top PCs, but were difficult to see
-because they were not axis aligned."*"""),
-
-code("""# --- PCA (variance axes) vs jPCA (dynamics axes), same data -----------------
-pc_coords = unstack(res['Z'][:2], C)             # top-2 PC projection, (2, C, T)
-pc_frac = np.sum(res['Z'][:2] ** 2) / np.sum(res['Z'] ** 2)
-cols0 = start_ordered_colors(projs[0][0])  # one condition->color map for both panels
-
-fig, axes = plt.subplots(1, 2, figsize=(11, 5))
-for c in range(C):
-    axes[0].plot(pc_coords[0, c], pc_coords[1, c], color=cols0[c], lw=0.8, alpha=0.8)
-    axes[0].plot(pc_coords[0, c, 0], pc_coords[1, c, 0], 'o', color=cols0[c], ms=3)
-axes[0].set_title(f'PC1-PC2 projection ({pc_frac:.0%} of var) — variance axes')
-axes[0].set_xlabel('PC1'); axes[0].set_ylabel('PC2'); axes[0].set_aspect('equal')
-
-coords, frac, r2p = projs[0]
-for c in range(C):
-    axes[1].plot(coords[0, c], coords[1, c], color=cols0[c], lw=0.8, alpha=0.8)
-    axes[1].plot(coords[0, c, 0], coords[1, c, 0], 'o', color=cols0[c], ms=3)
-axes[1].set_title(f'jPC plane 1 ({frac:.0%} of var) — dynamics axes')
-axes[1].set_xlabel('jPC1'); axes[1].set_ylabel('jPC2'); axes[1].set_aspect('equal')
-
-fig.suptitle('Same trajectories, same color per condition — two orthonormal bases of the same PC space')
-fig.tight_layout(); plt.show()"""),
-
-md("""## Why doesn't our figure look exactly like the paper's Figure 3?
-
-Two reasons remain, in order of visual impact:
+Why doesn't the figure above look exactly like the paper's Figure 3? Two reasons, in
+order of visual impact:
 
 1. **Time window.** The paper plots only the **first 200 ms of movement-related
    activity** per condition; everything above used the full 600 ms supplied in the
    file, so each loop includes the movement-offset / return segment, which doubles
-   back and tangles the picture. Below we refit jPCA on just −50 to 150 ms — the
-   arcs immediately resolve into the sweeping, radiating structure of the paper's
-   panels.
+   back and tangles the picture. Below we refit on just −50 to 150 ms — the arcs
+   immediately resolve into the sweeping, radiating structure of the paper's panels.
 2. **Which dataset.** The clean textbook loops are Figure 3a–b: monkeys B and A,
    28 *straight-reach* conditions recorded with single electrodes. This file is the
    108-condition **array** dataset (curved + straight reaches mixed), whose paper
    panels (e–f) are visibly messier too.
 
-Three further conventions of the original pipeline are now adopted here, after a
-side-by-side comparison with the reference Python port (`bantin/jPCA`,
-`simple_jPCA_example.ipynb`). Both are the **default** in our `jpca()`, so all
-three notebooks follow the original paper's analysis:
+Two conventions of the original toolbox are already visible in the steps above: the
+**constrained skew fit** (step 4 refines the closed-form guess by conjugate gradients,
+as the 2012 code does) and the **in-plane axis alignment** (step 5 puts the preparatory
+states along jPC1). The refit below reuses the one-line `jpca()` — it runs exactly the
+steps we just walked through.
 
-- **Axis alignment** (`align_axes`, on by default). The basis *within* a jPC
-  plane is arbitrary up to rotation, and the toolbox rotates it so the
-  first-bin — preparatory — states lie along the jPC1 axis. Without this step
-  the preparatory cloud leaks into both axes: across conditions, the
-  trial-start states have std 0.34 / 0.31 in jPC1 / jPC2 before alignment, vs
-  0.45 / 0.05 after — the same cloud, just rotated. This, not the data, is
-  what makes the paper's preparatory points look compact and ours did not.
-- **Constrained skew fit** (`refine_skew`, on by default). The toolbox
-  minimizes ‖dX − M·X‖ over skew-symmetric M directly (conjugate gradients);
-  the closed-form `(M − Mᵀ)/2` shortcut is only its initialization. The
-  difference is small (‖ΔM‖/‖M‖ ≈ 0.13 here) but this notebook matches the
-  reference pipeline exactly.
-- **Coloring.** Trajectories are colored by sorted starting jPC1 coordinate —
-  the preparatory state — via `start_ordered_colors`, as in the paper and the
-  MATLAB toolbox. Axes are still defined up to an overall sign.
+Honest caveat: even in the paper's window, the in-plane skew-symmetric fit is weak for
+this dataset — the rotation is visually consistent but the linear model in that plane
+explains little. The paper's quantitative claim rests on the fit in the full 6-D PC
+space, not on clean in-plane fits."""),
 
-Honest caveat: even in the paper's window, the in-plane skew-symmetric fit is
-weak for this dataset — the rotation is visually consistent but the linear
-model in that plane explains little. The paper's quantitative claim rests on
-the fit in the full 6-D PC space, not on clean in-plane fits."""),
-
-code("""# --- Refit jPCA on the paper's analysis window (first 200 ms) ---------------
+code("""# --- Refit on the paper's analysis window (first 200 ms) ---------------------
 k200 = int(np.searchsorted(times, 150))          # -50 .. 150 ms
-res200 = jpca(rates_p[:, :, :k200], n_pcs=6, dt_s=0.01)   # same default pipeline
+res200 = jpca(rates_p[:, :, :k200], n_pcs=6, dt_s=0.01)   # same pipeline, one call
 coords200, frac200, r2p200 = project_planes(res200)[0]
 print('200 ms window: plane 1 %.0f%% of var | in-plane rotation R^2 = %+.2f | freqs %s Hz'
       % (100 * frac200, r2p200, np.round(res200['freqs_hz'], 2)))
@@ -300,7 +362,6 @@ did not discover a hidden engine here — it re-displayed an order that exists i
 data. Whether that order has a physical, anatomical address is the question no
 electrode-only dataset can answer — and the subject of Notebook 01."""),
 ]
-
 nb0 = nbf.v4.new_notebook(cells=nb0_cells)
 nb0.metadata['kernelspec'] = {'display_name': 'Python 3', 'language': 'python',
                               'name': 'python3'}

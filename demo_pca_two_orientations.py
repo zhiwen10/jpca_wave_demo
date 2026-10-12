@@ -1,7 +1,7 @@
 """Visual check: PCA on X.T (samples = time points) vs PCA on X (samples = neurons).
 
 X is (N neurons, C*T time points), the stacked preprocessed real data — the
-same X that notebook 00's `jpca()` call is built on.
+same X that notebook 00 builds in its step 3 (stack conditions, then PCA).
   A = PCA(6).fit_transform(X.T).T   -> scores,     (6, C*T)   <- what jpca() uses
   B = PCA(6).fit(X).components_     -> components, (6, C*T)
 Same shape. Row k of A is row k of B times the k-th singular value (up to
@@ -18,7 +18,7 @@ from jpca_core import preprocess
 BLUE, ORANGE = '#2a78d6', '#eb6834'
 INK, MUTED, GRID = '#0b0b0b', '#898781', '#e6e5e1'
 
-# --- data: same X as notebook 00's jPCA call --------------------------------
+# --- data: same X as notebook 00's step-3 cell (stack + PCA) -----------------
 Data = loadmat('data/exampleData.mat', squeeze_me=True)['Data']
 rates = np.stack(Data['A']).transpose(2, 0, 1)            # (N, C, T)
 N, C, T = rates.shape
