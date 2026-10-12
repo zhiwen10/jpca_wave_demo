@@ -1,13 +1,11 @@
 # jpca_wave_demo
 
 Executable notebooks demonstrating (0) the jPCA pipeline on the real
-Churchland et al. 2012 reaching data, (1) the method on synthetic
-motor-cortex-like data, and (2) why pure sequential / peak-time-wave
+Churchland et al. 2012 reaching data, (1) why pure sequential / peak-time-wave
 structure produces the same rotations without any dynamical machinery
 (Lebedev et al. 2019; Kuzmina, Kriukov & Lebedev 2024) — including the
-physical-space (standing vs traveling wave) test those papers could not do.
-A fourth notebook (03) is a from-scratch explainer of the jPCA method itself —
-best read first.
+physical-space (standing vs traveling wave) test those papers could not do —
+and (2) a from-scratch explainer of the jPCA method itself, best read first.
 
 ## Files
 
@@ -17,7 +15,8 @@ best read first.
   through our own pipeline. Includes a before/after view of the two active
   preprocessing steps (soft-normalization, condition-mean subtraction),
   the peak-time-sorted raster on real
-  data (the Kuzmina construction made visible), the real rotation figure,
+  data (the Kuzmina construction made visible), the jPCA run itself (with the
+  steps explained in comments), the real rotation figure,
   a side-by-side PCA-vs-jPCA projection of the same trajectories
   (variance axes vs dynamics axes), and a refit on the paper's 200 ms
   analysis window showing why our default figure looks messier than Fig. 3.
@@ -26,14 +25,11 @@ best read first.
   in-plane axes aligned so preparatory states lie along jPC1
   (`align_axes=True`), and color = sorted starting jPC1 coordinate
   (preparatory state), via `start_ordered_colors`.
-- `01_jpca_motor_rotation.ipynb` — the Churchland 2012 pipeline end-to-end on
-  synthetic reaching data, with each preprocessing step shown before/after
-  and the skew-symmetric fit explained; whole-space vs in-plane R² metric subtlety.
-- `02_lebedev_sequences_waves.ipynb` — pure feedforward sequences rotate
+- `01_lebedev_sequences_waves.ipynb` — pure feedforward sequences rotate
   under the same pipeline; the Kuzmina spacing sweep (synchrony and
   decorrelation both kill rotation); traveling vs standing waves in physical
   space (ellipticity, phase-vs-position fingerprint); preprocessing fragility.
-- `03_jpca_explained.ipynb` — a from-scratch explainer of the method itself
+- `02_jpca_explained.ipynb` — a from-scratch explainer of the method itself
   (best read first, no data needed): state space, the least-squares fit of
   dX/dt = M·X, why skew-symmetric = pure rotation, how the eigenvalue pairs of
   M become rotation planes and the loop figure (built by hand in 3D and 6D),
@@ -57,8 +53,8 @@ conda activate jpca
 jupyter lab                           # or: jupyter notebook
 ```
 
-Then open the notebooks in order: `03_jpca_explained.ipynb` first (the
-method, from scratch, no data needed), then `00`, `01`, `02`. Run each
+Then open the notebooks in order: `02_jpca_explained.ipynb` first (the
+method, from scratch, no data needed), then `00`, then `01`. Run each
 notebook top to bottom; everything is self-contained and the real dataset
 (`data/exampleData.mat`) is included.
 
@@ -70,7 +66,7 @@ Regenerate and re-execute the notebooks from `build_notebooks.py`:
 
 ```bash
 python build_notebooks.py
-for nb in 00_real_data_churchland2012 01_jpca_motor_rotation 02_lebedev_sequences_waves 03_jpca_explained; do
+for nb in 00_real_data_churchland2012 01_lebedev_sequences_waves 02_jpca_explained; do
   python -m jupyter nbconvert --to notebook --execute --inplace $nb.ipynb
 done
 ```
@@ -84,11 +80,7 @@ done
   200 ms window + axis alignment + constrained skew fit, the figure
   reproduces the bantin/jPCA reference starburst (preparatory states compact
   along jPC1, trajectories sweeping out).
-- Notebook 1 (synthetic): top jPC plane ≈ 95% of variance, in-plane rotation
-  R² ≈ 0.62, recovered frequency ≈ 1.8 Hz (true 2.0 Hz); whole-space R² ≈ 0.58
-  (ramp dimensions dilute it — metric choice matters). Trajectories start from
-  condition-specific preparatory states on a ring, as in the real data.
-- Notebook 2: pure sequences give whole-space rotation R² ≈ 0.67 with zero
+- Notebook 1: pure sequences give whole-space rotation R² ≈ 0.67 with zero
   dynamics in the generator; rotation vs peak-spacing b peaks at intermediate
   b and collapses at b=0 (standing/synchronous) and b→∞ (decorrelated);
   traveling wave → ellipticity ≈ 0.83 with phase linearly ordered along
