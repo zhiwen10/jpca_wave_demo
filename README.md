@@ -30,7 +30,7 @@ and (2) a from-scratch explainer of the jPCA method itself, best read first.
 - `01_lebedev_sequences_waves.ipynb` — pure feedforward sequences rotate
   under the same pipeline; the Kuzmina spacing sweep (synchrony and
   decorrelation both kill rotation); traveling vs standing waves in physical
-  space (ellipticity, phase-vs-position fingerprint); preprocessing fragility.
+  space (ellipticity, phase-vs-position fingerprint).
 - `02_jpca_explained.ipynb` — a from-scratch explainer of the method itself
   (best read first, no data needed): state space, the least-squares fit of
   dX/dt = M·X, why skew-symmetric = pure rotation, how the eigenvalue pairs of

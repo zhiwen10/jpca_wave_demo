@@ -46,15 +46,31 @@ step of `preprocess` and keep only soft-normalization + cross-condition mean sub
 **The dynamical-systems approach.** Instead of reading neurons one at a time, treat the
 whole population as ONE point moving through "neuron space" (one axis per neuron) — one
 **trajectory** per condition — and fit a law of motion to those trajectories:
-**dX/dt = M·X**, "where the state is heading = one fixed matrix × where it is". jPCA is
-exactly that idea, with one constraint on M.
 
-**The constraint: a skew-symmetric matrix.** Any matrix splits into a symmetric part
-(which stretches/shrinks the state — growth and decay) and a **skew-symmetric** part
-(M = −Mᵀ), which only *rotates* the state. A skew-symmetric matrix has purely imaginary
-eigenvalues in ±iω pairs, and each pair defines one plane in which the state rotates at
-frequency ω/2π. jPCA keeps only this rotational part of the fitted dynamics. (Notebook
-02 walks through all of this math slowly, by hand.)
+> dX/dt = M·X — "where the state is heading = one fixed matrix × where it is"
+
+If we knew M, we would know the rules of the system. We don't — but we can estimate it
+from data: measure the state in every time bin (X) and the change between adjacent bins
+(dX), then find the M that makes dX ≈ M·X as closely as possible over all bins. That is
+an ordinary least-squares problem — M = dX·X⁺ (MATLAB users would write `M = dX / X`).
+jPCA is exactly that idea, with one constraint on M.
+
+**The constraint: a skew-symmetric matrix.** Any matrix splits by plain algebra into
+
+> M = (M + Mᵀ)/2  +  (M − Mᵀ)/2  =  symmetric part  +  skew-symmetric part
+
+and the two pieces do geometrically different jobs: the symmetric part stretches or
+shrinks the state along fixed axes (growth, decay), while the skew-symmetric part
+(M = −Mᵀ) only *rotates* it. Why skew = rotation: circular motion x = r·cos(ωt),
+y = r·sin(ωt) differentiates to
+
+> dx/dt = −ω·y,   dy/dt = ω·x   →   dX/dt = [[0, −ω], [ω, 0]]·X
+
+— exactly a skew-symmetric matrix. The converse also holds: **every** skew-symmetric
+matrix has purely imaginary eigenvalues in conjugate pairs ±iω and generates pure
+rotation; each pair defines one plane in which the state rotates at frequency ω/2π.
+jPCA keeps only this rotational part of the fitted M and reads the rotation planes off
+its eigenvalues. (Notebook 02 walks through all of this math slowly, with toy code.)
 
 **The pipeline, step by step** — each step below gets its own cell(s):
 
@@ -566,38 +582,9 @@ position**. The standing wave gives neither: ellipticity → 0 (a line segment),
 is flat across space. So a local jPCA rotation rules out a purely standing pattern by
 itself; what it cannot tell apart, without anatomy, is *which* traveling order produced
 it — the physical wave, or any other recruitment order. That is precisely the gap a
-simultaneous widefield + dense-electrophysiology design closes.
-
-## The fragility Kuzmina documented
-
-Rotation strength is sensitive to preprocessing choices. Same sequence data, varying
-only the smoothing kernel:"""),
-
-code("""widths = [5, 10, 20, 40, 80, 150]
-r2s = [rotation_r2(preprocess(rates_seq, bin_ms=10, smooth_sd_ms=w)) for w in widths]
-for w, r in zip(widths, r2s):
-    print(f'smoothing = {w:4d} ms   ->   rotation R^2 = {r:+.3f}')
-plt.figure(figsize=(5, 3.5)); plt.plot(widths, r2s, 'o-')
-plt.xlabel('smoothing kernel width (ms)'); plt.ylabel('rotation R$^2$')
-plt.title('Same data, different preprocessing, different "rotation"')
-plt.show()"""),
-
-md("""## Takeaways
-
-1. **jPCA rotation = phase-ordered structure in the population.** It is a display format,
-   not a mechanism. Sequences produce it (Lebedev 2019); peak-time waves produce it
-   (Kuzmina 2024); a physical traveling wave produces it. Recurrence, attractors, and
-   pattern-generation machinery are *not* required.
-2. **The rotation collapses for standing/synchronous patterns** (no phase gradient, no
-   quadrature pair) and for decorrelated ones. Its presence tells you an order exists;
-   its shape (ellipticity) tells you how clean the quadrature is.
-3. **The open scientific question is spatial, not mathematical.** Everyone can find an
-   ordering of neurons that makes a wave. The question nobody could ask until now:
-   does that order coincide with a *physical anatomical path* — and does perturbing the
-   physical wave move the latent rotation?
-4. **Preprocessing is a hypothesis.** Rotation strength moves with smoothing width,
-   normalization, and condition count. Report the pipeline with the result, and fix it
-   before looking at the answer."""),
+simultaneous widefield + dense-electrophysiology design closes. (Rotation strength is
+also fragile to preprocessing choices — smoothing width alone can move it substantially,
+as Kuzmina et al. document — so the pipeline is part of the result.)"""),
 ]
 
 nb1 = nbf.v4.new_notebook(cells=nb1_cells)
@@ -795,32 +782,28 @@ print('-> a skew matrix turns vectors WITHOUT changing their length. That is all
 
 md("""## 4. How ONE matrix becomes "rotation planes" and the loop figure
 
-This is the step everyone gets stuck on. Take it in two sizes.
-
 **In 3D, where you can see it.** In 3D a skew-symmetric matrix is an old friend:
 [[0, −c, b], [c, 0, −a], [−b, a, 0]] times a vector is exactly the cross product
-(a, b, c) × v. So 3-D skew dynamics = rotation **about an axis**, and the motion
-happens **in the plane perpendicular to that axis**. Its eigenvalues are
+(a, b, c) × v. So 3-D skew dynamics = rotation **about an axis**, with the motion
+happening **in the plane perpendicular to that axis**. Its eigenvalues are
 {0, +iω, −iω}: the 0 belongs to the axis (points on it don't move); the ±iω pair
-describes the circling in the plane. The eigenvector of +iω is *complex*,
-v = a + ib — and its real part a and imaginary part b are two ordinary real
-vectors that span exactly the rotation plane.
+describes the circling. The eigenvector of +iω is *complex*, v = a + ib — and its
+real part a and imaginary part b are two ordinary real vectors that span exactly
+the rotation plane.
 
-**In 6D there is no single axis — instead, up to three independent planes.** A 6×6
-skew matrix can rotate in three 2-D planes *at once*, each at its own frequency,
-like three gears inside one machine. `eig(M_skew)` hands you all three: the
-eigenvalues come in pure-imaginary pairs ±iω₁, ±iω₂, ±iω₃, and each pair's
-eigenvector v = a + ib supplies that plane's two spanning directions. The
-frequency you read off, ω/2π, is the number printed as "Hz" in notebooks 00–01.
+**In 6D there is no single axis — instead, up to three independent planes**, each
+rotating at its own frequency, like three gears inside one machine. `eig(M_skew)`
+hands you all three: eigenvalues in pure-imaginary pairs ±iω₁, ±iω₂, ±iω₃, each
+pair's eigenvector supplying that plane's two spanning directions; ω/2π is the
+number printed as "Hz" in notebooks 00–01.
 
-**The loop figure is then just a change of coordinates.** For each time point,
-project the state onto the plane's two directions: coordinate 1 = a·Z(t),
-coordinate 2 = b·Z(t) — two dot products per time point. Plot coordinate 2 against
-coordinate 1 as time runs. If the dynamics in that plane really is a rotation, the
-plot traces a loop. That plot *is* the famous jPCA figure.
-
-Below: first the 3-D case, then a 6-D system built BY HAND with two rotation
-planes, so we can watch `eig()` recover them and draw the loop figure ourselves."""),
+**The loop figure is then just a change of coordinates:** project the state onto
+the plane's two directions — coordinate 1 = a·Z(t), coordinate 2 = b·Z(t), two dot
+products per time point — and plot one against the other as time runs. If the
+dynamics in that plane really is a rotation, the plot traces a loop. That plot *is*
+the famous jPCA figure. Below: first the 3-D case, then a 6-D system built BY HAND
+with two rotation planes, so we can watch `eig()` recover them and draw the loop
+figure ourselves."""),
 
 code("""# --- 3D: a skew matrix = rotation about an axis -------------------------------
 # Rotation about the z-axis at 1 Hz: x and y chase each other, z does nothing.
@@ -894,30 +877,28 @@ the plane spanned by two patterns a and b:
 
 > X(t) = a·cos(ωt) + b·sin(ωt)
 
-Read that aloud: at phase 0 the population activity IS pattern a. A quarter-cycle
-later cos has faded and sin has grown, so the population IS pattern b. Then −a
+Read that aloud: at phase 0 the population activity IS pattern a; a quarter-cycle
+later cos has faded and sin has grown, so the population IS pattern b; then −a
 (the same shape, sign-flipped), then −b, then back to a. **A rotation in state
 space = the population endlessly morphing through a → b → −a → −b.** The first
 figure below freezes one cycle at 8 moments so you can watch the morphing.
 
-Now the single-neuron view. Neuron i's rate is
+In the single-neuron view, neuron i's rate is
 
 > rate_i(t) = a_i·cos(ωt) + b_i·sin(ωt) = R_i·cos(ωt − φ_i)
 
 (any mixture A·cos + B·sin is a single cosine with some amplitude R and phase φ).
 So **every neuron oscillates at the same frequency, but each at its own phase** —
-each neuron peaks at its own time. That is the second figure, left panel.
+each neuron peaks at its own time (second figure, left panel).
 
 And now the punchline. Neurons peaking one after another *is what a sequence is*.
 Sort the neurons by their phase (= peak time) and stack their rates as an image:
 a traveling wave appears (middle panel). The same data in state space is a loop
 (right panel). **"The population state rotates" and "the neurons fire in a
-phase-shifted sequence" are two descriptions of ONE object.**
-
-That is why jPCA reports rotations for pure feedforward sequences (notebook 01),
-and why the loop figure alone cannot tell you whether any dynamical machinery
-produced them. It is a display format for phase-ordered structure — not a
-detector of an engine."""),
+phase-shifted sequence" are two descriptions of ONE object** — which is why jPCA
+reports rotations for pure feedforward sequences (notebook 01), and why the loop
+figure alone cannot tell you whether any dynamical machinery produced them. It is
+a display format for phase-ordered structure — not a detector of an engine."""),
 
 code("""# --- One rotation cycle = the population morphing a -> b -> -a -> -b -> a -----
 n_neurons = 20
