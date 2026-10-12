@@ -40,7 +40,6 @@ and (2) a from-scratch explainer of the jPCA method itself, best read first.
   rotation metrics, synthetic data generators. The fit follows the original
   2012 toolbox (and the bantin port) by default: constrained skew-symmetric
   least squares (`refine_skew`) + preparatory-axis alignment (`align_axes`).
-- `build_notebooks.py` — regenerates the three .ipynb files (nbformat).
 - `data/exampleData.mat` — the real Churchland 2012 data (mirror of the
   Churchland lab jPCA distribution, via the nwb4edu repo).
 
@@ -64,10 +63,9 @@ To remove the environment later: `conda deactivate; conda env remove -n jpca`.
 
 ## Run (maintainers)
 
-Regenerate and re-execute the notebooks from `build_notebooks.py`:
+To re-execute all notebooks in place (e.g. after editing `jpca_core.py`):
 
 ```bash
-python build_notebooks.py
 for nb in 00_real_data_churchland2012 01_lebedev_sequences_waves 02_jpca_explained; do
   python -m jupyter nbconvert --to notebook --execute --inplace $nb.ipynb
 done
